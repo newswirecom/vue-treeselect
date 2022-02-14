@@ -137,7 +137,7 @@
         case KEY_CODES.ENTER: {
           evt.preventDefault()
           if (instance.menu.current === null) return
-          const current = instance.getNode(instance.menu.current)
+          const current = instance.getNodeByPath(instance.menu.current)
           if (current.isBranch && instance.disableBranchNodes) return
           instance.select(current)
           break
@@ -161,7 +161,7 @@
           break
         }
         case KEY_CODES.ARROW_LEFT: {
-          const current = instance.getNode(instance.menu.current)
+          const current = instance.getNodeByPath(instance.menu.current)
           if (current.isBranch && instance.shouldExpand(current)) {
             evt.preventDefault()
             instance.toggleExpanded(current)
@@ -177,7 +177,7 @@
           break
         }
         case KEY_CODES.ARROW_RIGHT: {
-          const current = instance.getNode(instance.menu.current)
+          const current = instance.getNodeByPath(instance.menu.current)
           if (current.isBranch && !instance.shouldExpand(current)) {
             evt.preventDefault()
             instance.toggleExpanded(current)

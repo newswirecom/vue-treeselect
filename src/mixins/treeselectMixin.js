@@ -663,6 +663,8 @@ export default {
         normalizedOptions: [],
         // <id, node> map for quick look-up.
         nodeMap: createMap(),
+        // <path, node> map for quick look-up.
+        nodePathMap: createMap(),
         // <id, checkedState> map, used for multi-select mode.
         checkedStateMap: createMap(),
         // Id list of all selected options.
@@ -779,11 +781,34 @@ export default {
       return visibleOptionIds
     },
     /**
+     * Path list of nodes displayed in the menu. Nodes that are considered NOT visible:
+     *   - descendants of a collapsed branch node
+     *   - in local search mode, nodes that are not matched, unless
+     *       - it's a branch node and has matched descendants
+     *       - it's a leaf node and its parent node is explicitly set to show all children
+     * @type {id[]}
+     */
+     visibleOptionPaths() {
+      const visibleOptionPaths = []
+
+      this.traverseAllNodesByIndex(node => {
+        if (!this.localSearch.active || this.shouldOptionBeIncludedInSearchResult(node)) {
+          visibleOptionPaths.push(node.path)
+        }
+        // Skip the traversal of descendants of a branch node if it's not expanded.
+        if (node.isBranch && !this.shouldExpand(node)) {
+          return false
+        }
+      })
+
+      return visibleOptionPaths
+    },
+    /**
      * Has any option should be displayed in the menu?
      * @type {boolean}
      */
     hasVisibleOptions() {
-      return this.visibleOptionIds.length !== 0
+      return this.visibleOptionPaths.length !== 0
     },
     /**
      * Should show children count when searching?
@@ -878,6 +903,7 @@ export default {
   },
 
   methods: {
+
     verifyProps() {
       warning(
         () => this.async ? this.searchable : true,
@@ -928,6 +954,7 @@ export default {
         // In case we are re-initializing options, keep the old state tree temporarily.
         const prevNodeMap = this.forest.nodeMap
         this.forest.nodeMap = createMap()
+        this.forest.nodePathMap = createMap()
         this.keepDataOfSelectedNodes(prevNodeMap)
         this.forest.normalizedOptions = this.normalize(NO_PARENT_NODE, options, prevNodeMap)
         // Cases that need fixing `selectedNodeIds`:
@@ -970,6 +997,22 @@ export default {
         : this.createFallbackNode(nodeId)
     },
 
+    // ---------------------------------------------------
+    // @todo Add support for fallback nodes if required
+    // ---------------------------------------------------
+    getNodeByPath(nodePath) {
+      warning(
+        () => nodePath != null,
+        () => `Invalid node path: ${nodePath}`,
+      )
+
+      if (nodePath == null) return null
+
+      return nodePath in this.forest.nodePathMap
+        ? this.forest.nodePathMap[nodePath]
+        : null
+    },
+
     createFallbackNode(id) {
       // In case there is a default selected node that is not loaded into the tree yet,
       // we create a fallback node to keep the component working.
@@ -992,6 +1035,8 @@ export default {
         level: 0,
         raw,
       }
+
+      fallbackNode.path = this.generatePath(fallbackNode)
 
       return this.$set(this.forest.nodeMap, id, fallbackNode)
     },
@@ -1366,18 +1411,21 @@ export default {
     },
 
     setCurrentHighlightedOption(node, scroll = true) {
-      const prev = this.menu.current
-      if (prev != null && prev in this.forest.nodeMap) {
-        this.forest.nodeMap[prev].isHighlighted = false
+      const prevPath = this.menu.current
+      if (prevPath != null) {
+        const prev = this.getNodeByPath(prevPath)
+        if (prev) {
+          prev.isHighlighted = false
+        }
       }
 
-      this.menu.current = node.id
+      this.menu.current = node.path
       node.isHighlighted = true
 
       if (this.menu.isOpen && scroll) {
         const scrollToOption = () => {
           const $menu = this.getMenu()
-          const $option = $menu.querySelector(`.vue-treeselect__option[data-id="${node.id}"]`)
+          const $option = $menu.querySelector(`.vue-treeselect__option[data-path="${node.path}"]`)
           if ($option) scrollIntoView($menu, $option)
         }
 
@@ -1396,8 +1444,8 @@ export default {
 
       if (
         forceReset || current == null ||
-        !(current in this.forest.nodeMap) ||
-        !this.shouldShowOptionInMenu(this.getNode(current))
+        !(current in this.forest.nodePathMap) ||
+        !this.shouldShowOptionInMenu(this.getNodeByPath(current))
       ) {
         this.highlightFirstOption()
       }
@@ -1406,31 +1454,31 @@ export default {
     highlightFirstOption() {
       if (!this.hasVisibleOptions) return
 
-      const first = this.visibleOptionIds[0]
-      this.setCurrentHighlightedOption(this.getNode(first))
+      const first = this.visibleOptionPaths[0]
+      this.setCurrentHighlightedOption(this.getNodeByPath(first))
     },
 
     highlightPrevOption() {
       if (!this.hasVisibleOptions) return
 
-      const prev = this.visibleOptionIds.indexOf(this.menu.current) - 1
+      const prev = this.visibleOptionPaths.indexOf(this.menu.current) - 1
       if (prev === -1) return this.highlightLastOption()
-      this.setCurrentHighlightedOption(this.getNode(this.visibleOptionIds[prev]))
+      this.setCurrentHighlightedOption(this.getNodeByPath(this.visibleOptionPaths[prev]))
     },
 
     highlightNextOption() {
       if (!this.hasVisibleOptions) return
 
-      const next = this.visibleOptionIds.indexOf(this.menu.current) + 1
-      if (next === this.visibleOptionIds.length) return this.highlightFirstOption()
-      this.setCurrentHighlightedOption(this.getNode(this.visibleOptionIds[next]))
+      const next = this.visibleOptionPaths.indexOf(this.menu.current) + 1
+      if (next === this.visibleOptionPaths.length) return this.highlightFirstOption()
+      this.setCurrentHighlightedOption(this.getNodeByPath(this.visibleOptionPaths[next]))
     },
 
     highlightLastOption() {
       if (!this.hasVisibleOptions) return
 
-      const last = getLast(this.visibleOptionIds)
-      this.setCurrentHighlightedOption(this.getNode(last))
+      const last = getLast(this.visibleOptionPaths)
+      this.setCurrentHighlightedOption(this.getNodeByPath(last))
     },
 
     resetSearchQuery() {
@@ -1514,6 +1562,14 @@ export default {
       }
     },
 
+    generatePath(node) {
+      if (node.parentNode !== NO_PARENT_NODE) {
+        return this.generatePath(node.parentNode) + '/' + node.id
+      }
+
+      return '/' + node.id
+    },
+
     normalize(parentNode, nodes, prevNodeMap) {
       let normalizedOptions = nodes
         .map(node => [ this.enhancedNormalizer(node), node ])
@@ -1553,6 +1609,10 @@ export default {
           this.$set(normalized, 'isLeaf', isLeaf)
           this.$set(normalized, 'isRootNode', isRootNode)
           this.$set(normalized, 'raw', raw)
+
+          const path = this.generatePath(normalized)
+          this.$set(normalized, 'path', this.generatePath(normalized))
+          this.$set(this.forest.nodePathMap, path, normalized)
 
           if (isBranch) {
             const isLoaded = Array.isArray(children)
@@ -1734,11 +1794,20 @@ export default {
     },
 
     checkDuplication(node) {
-      warning(
-        () => !((node.id in this.forest.nodeMap) && !this.forest.nodeMap[node.id].isFallbackNode),
-        () => `Detected duplicate presence of node id ${JSON.stringify(node.id)}. ` +
-          `Their labels are "${this.forest.nodeMap[node.id].label}" and "${node.label}" respectively.`,
-      )
+      if (this.disableBranchNodes) {
+        warning(
+          () => !((node.path in this.forest.nodePathMap) && !this.forest.nodePathMap[node.path].isFallbackNode),
+          () => `Detected duplicate presence of node path ${JSON.stringify(node.path)}. ` +
+            `Their labels are "${this.forest.nodePathMap[node.path].label}" and "${node.label}" respectively.`,
+        )
+      } else {
+        warning(
+          () => !((node.id in this.forest.nodeMap) && !this.forest.nodeMap[node.id].isFallbackNode),
+          () => `Detected duplicate presence of node id ${JSON.stringify(node.id)}. ` +
+            `Their labels are "${this.forest.nodeMap[node.id].label}" and "${node.label}" respectively. ` +
+            `Enable experimental node path support by disabling branch node selection if this is intentional.`
+        )
+      }
     },
 
     verifyNodeShape(node) {

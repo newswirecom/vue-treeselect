@@ -44,7 +44,7 @@
         }
 
         return (
-          <div class={optionClass} onMouseenter={this.handleMouseEnterOption} data-id={node.id}>
+          <div class={optionClass} onMouseenter={this.handleMouseEnterOption} data-id={node.id} data-path={node.path}>
             {this.renderArrow()}
             {this.renderLabelContainer([
               this.renderCheckboxContainer([
